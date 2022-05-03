@@ -1,0 +1,46 @@
+version: "2.4"
+
+services:
+  loges01:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.10.1
+    restart: always
+    container_name: loges01
+    environment:
+      - node.name=loges01
+      - cluster.name=es-docker-cluster
+      - network.host=0.0.0.0
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms384m -Xmx384m"
+    ports:
+      - 9200:9200
+    volumes:
+      - esdata01:/usr/share/elasticsearch/data
+
+  logstash:
+    build: ./logstash
+    restart: always
+    container_name: logstash 
+    # parametro disponible en compose 2.4
+    mem_limit: 512m
+    depends_on:
+      - loges01
+    ports:
+      - 5960:5960/udp
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.10.2
+    restart: always
+    container_name: kibana
+    environment:
+      ELASTICSEARCH_HOSTS: "http://loges01:9200"
+    # parametro disponible en compose 2.4
+    mem_limit: 256m
+    depends_on:
+      - loges01
+      - logstash
+    ports:
+      - 5601:5601
+
+volumes:
+  esdata01:
+    driver: local
