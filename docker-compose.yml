@@ -2,7 +2,7 @@ version: "2.4"
 
 services:
   loges01:
-    image: docker.elastic.co/elasticsearch/elasticsearch:7.10.1
+    image: opensearchproject/opensearch:latest
     restart: always
     container_name: loges01
     environment:
@@ -13,8 +13,9 @@ services:
       - "ES_JAVA_OPTS=-Xms384m -Xmx384m"
     ports:
       - 9200:9200
+      - 9600:9600 # required for Performance Analyzer
     volumes:
-      - esdata01:/usr/share/elasticsearch/data
+      - esdata01:/usr/share/opensearch/data
 
   logstash:
     build: ./logstash
@@ -28,11 +29,11 @@ services:
       - 5960:5960/udp
 
   kibana:
-    image: docker.elastic.co/kibana/kibana:7.10.2
+    image: opensearchproject/opensearch-dashboards:latest
     restart: always
     container_name: kibana
     environment:
-      ELASTICSEARCH_HOSTS: "http://loges01:9200"
+      OPENSEARCH_HOSTS: "https://loges01:9200"
     # parametro disponible en compose 2.4
     mem_limit: 256m
     depends_on:
@@ -40,7 +41,8 @@ services:
       - logstash
     ports:
       - 5601:5601
-
+    expose:
+      - "5601"
 volumes:
   esdata01:
     driver: local
