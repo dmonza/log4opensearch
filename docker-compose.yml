@@ -5,12 +5,14 @@ services:
     image: opensearchproject/opensearch:latest
     restart: always
     container_name: loges01
+    mem_limit: 1024m
     environment:
       - node.name=loges01
       - cluster.name=es-docker-cluster
       - network.host=0.0.0.0
       - discovery.type=single-node
       - "ES_JAVA_OPTS=-Xms384m -Xmx384m"
+      # - DISABLE_SECURITY_PLUGIN=true # Disable in production environment
     ports:
       - 9200:9200
       - 9600:9600 # required for Performance Analyzer
