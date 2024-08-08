@@ -22,7 +22,7 @@ services:
     ports:
       - 9200:9200
       - 9600:9600
-    volumes:
+    # volumes:
       # Descomentar para persistir datos
       # - esdata01:/usr/share/opensearch/data
 
