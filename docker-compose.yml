@@ -18,7 +18,8 @@ services:
       - network.host=0.0.0.0
       - discovery.type=single-node
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=My1Secure_
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=admin
+      - "DISABLE_SECURITY_PLUGIN=true" # Disables Security plugin
     ports:
       - 9200:9200
       - 9600:9600
@@ -36,13 +37,13 @@ services:
       - 5960:5960/udp
 
   kibana:
-    image: opensearchproject/opensearch-dashboards:2.16.0
+    # image: opensearchproject/opensearch-dashboards:2.16.0
+    build: ./opensearch_dashboards
     restart: always
     container_name: kibana
     environment:
-      - OPENSEARCH_HOSTS=https://loges01:9200
-      - OPENSEARCH_USERNAME=admin
-      - OPENSEARCH_PASSWORD=My1Secure_
+      - OPENSEARCH_HOSTS=http://loges01:9200
+      # - OPENSEARCH_HOSTS=https://loges01:9200
     depends_on:
       - loges01
       - logstash
