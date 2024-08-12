@@ -3,28 +3,24 @@ version: "3.8"
 services:
   loges01:
     image: opensearchproject/opensearch:2.16.0
+    # build: opensearch
     restart: always
     container_name: loges01
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-      nofile:
-        soft: 65536
-        hard: 65536
     environment:
       - node.name=loges01
+      - discovery.type=single-node
       - cluster.name=es-docker-cluster
       - network.host=0.0.0.0
-      - discovery.type=single-node
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=admin
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
       - "DISABLE_SECURITY_PLUGIN=true" # Disables Security plugin
+      # - OPENSEARCH_INITIAL_ADMIN_PASSWORD=admin
+      
     ports:
-      - 9200:9200
-      - 9600:9600
+      - 9200:9200 # Opensearch
+      # - 9600:9600
+      # - 5601:5601 # Opensearch Dashboards
+    # Descomentar para persistir datos
     # volumes:
-      # Descomentar para persistir datos
       # - esdata01:/usr/share/opensearch/data
 
   logstash:
@@ -52,6 +48,6 @@ services:
     expose:
       - "5601"
 
-volumes:
-  esdata01:
-    driver: local
+# volumes:
+#   esdata01:
+#     driver: local

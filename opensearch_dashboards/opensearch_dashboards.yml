@@ -215,7 +215,7 @@
 
 # ORIGINAL CONFIG-------------------------------
 #opensearch.hosts: [https://localhost:9200]
-opensearch.hosts: [http://localhost:9200]
+opensearch.hosts: [http://loges01:9200]
 opensearch.ssl.verificationMode: none
 # opensearch.username: kibanaserver
 # opensearch.password: kibanaserver
