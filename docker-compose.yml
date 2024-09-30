@@ -2,8 +2,8 @@ version: "3.8"
 
 services:
   loges01:
-    image: opensearchproject/opensearch:2.16.0
-    # build: opensearch
+    # image: opensearchproject/opensearch:2.16.0
+    image: opensearchproject/opensearch:latest
     restart: always
     container_name: loges01
     environment:
