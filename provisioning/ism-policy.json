@@ -1,0 +1,23 @@
+{
+  "policy": {
+    "description": "log4opensearch: delete log indices after the retention window",
+    "default_state": "hot",
+    "ism_template": [
+      { "index_patterns": ["logstash-*"], "priority": 100 }
+    ],
+    "states": [
+      {
+        "name": "hot",
+        "actions": [],
+        "transitions": [
+          { "state_name": "delete", "conditions": { "min_index_age": "__RETENTION__d" } }
+        ]
+      },
+      {
+        "name": "delete",
+        "actions": [{ "delete": {} }],
+        "transitions": []
+      }
+    ]
+  }
+}

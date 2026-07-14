@@ -1,0 +1,21 @@
+# Machine-specific overrides: ports, heap and — once security is on — credentials.
+# .env is committed on purpose and holds no secrets; this is where secrets go instead.
+docker-compose.override.yml
+
+# Never commit keys or certificates
+*.key
+*.pem
+*.p12
+*.jks
+*.crt
+*.cert
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+.claude
+

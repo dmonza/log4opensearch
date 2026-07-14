@@ -1,0 +1,30 @@
+{
+  "index_patterns": ["logstash-*"],
+  "priority": 100,
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0,
+      "refresh_interval": "5s"
+    },
+    "mappings": {
+      "dynamic": "true",
+      "properties": {
+        "@timestamp":   { "type": "date" },
+        "loglevel":     { "type": "keyword" },
+        "threadid":     { "type": "keyword" },
+        "host":         { "type": "keyword" },
+        "env":          { "type": "keyword" },
+        "program":      { "type": "keyword" },
+        "program_name": { "type": "keyword" },
+        "tag":          { "type": "keyword" },
+        "traceId":      { "type": "keyword" },
+        "source_ip":    { "type": "keyword" },
+        "entityId":     { "type": "keyword" },
+        "type":         { "type": "keyword" },
+        "tags":         { "type": "keyword" },
+        "message":      { "type": "text" }
+      }
+    }
+  }
+}

@@ -1,53 +1,96 @@
-version: "3.8"
+name: log4opensearch
 
 services:
-  loges01:
-    # image: opensearchproject/opensearch:2.16.0
-    image: opensearchproject/opensearch:latest
-    restart: always
-    container_name: loges01
+  opensearch:
+    image: opensearchproject/opensearch:${OPENSEARCH_VERSION}
+    restart: unless-stopped
     environment:
-      - node.name=loges01
+      - node.name=opensearch
+      - cluster.name=log4opensearch-cluster
       - discovery.type=single-node
-      - cluster.name=es-docker-cluster
       - network.host=0.0.0.0
-      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
-      - "DISABLE_SECURITY_PLUGIN=true" # Disables Security plugin
-      # - OPENSEARCH_INITIAL_ADMIN_PASSWORD=admin
-      
+      - bootstrap.memory_lock=true
+      - OPENSEARCH_JAVA_OPTS=-Xms${OPENSEARCH_HEAP} -Xmx${OPENSEARCH_HEAP}
+      # DEV-FIRST: security plugin disabled on purpose. See README > Security.
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
     ports:
-      - 9200:9200 # Opensearch
-      # - 9600:9600
-      # - 5601:5601 # Opensearch Dashboards
-    # Descomentar para persistir datos
-    # volumes:
-      # - esdata01:/usr/share/opensearch/data
+      - "${OPENSEARCH_PORT}:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
+  # One-shot: installs the index template and the ISM retention policy.
+  provisioning:
+    image: curlimages/curl:8.11.1
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    environment:
+      - OPENSEARCH_URL=http://opensearch:9200
+      - LOG_RETENTION_DAYS=${LOG_RETENTION_DAYS}
+    volumes:
+      - ./provisioning:/provisioning:ro
+    entrypoint: ["sh", "/provisioning/bootstrap.sh"]
+    restart: on-failure
 
   logstash:
-    build: ./logstash
-    restart: always
-    container_name: logstash 
+    build:
+      context: ./logstash
+      args:
+        LOGSTASH_VERSION: ${LOGSTASH_VERSION}
+    image: log4opensearch/logstash:${LOGSTASH_VERSION}
+    restart: unless-stopped
     depends_on:
-      - loges01
-    ports:
-      - 5960:5960/udp
-
-  kibana:
-    # image: opensearchproject/opensearch-dashboards:2.16.0
-    build: ./opensearch_dashboards
-    restart: always
-    container_name: kibana
+      opensearch:
+        condition: service_healthy
+      provisioning:
+        condition: service_completed_successfully
     environment:
-      - OPENSEARCH_HOSTS=http://loges01:9200
-      # - OPENSEARCH_HOSTS=https://loges01:9200
-    depends_on:
-      - loges01
-      - logstash
+      - LS_JAVA_OPTS=-Xms${LOGSTASH_HEAP} -Xmx${LOGSTASH_HEAP}
+      - OPENSEARCH_URL=http://opensearch:9200
+      # Logstash 8 defaults every plugin to ECS mode, which turns `host` into an object and
+      # collides with the flat mapping in provisioning/index-template.json. The pipeline sets
+      # ecs_compatibility => "disabled" on each plugin, but this makes it the pipeline-wide
+      # default too: a plugin added later without that setting cannot silently poison the
+      # mapping. The image's entrypoint maps this env var into logstash.yml (via env2yaml).
+      - PIPELINE_ECS_COMPATIBILITY=disabled
     ports:
-      - 5601:5601
-    expose:
-      - "5601"
+      - "${LOG_UDP_PORT}:5960/udp"
+    healthcheck:
+      # The API on :9600 answers well before the pipeline is up, so it alone would report
+      # healthy while the UDP listener is not bound yet — and UDP being fire-and-forget,
+      # every log line sent in that window is lost silently. Also require the socket to be
+      # bound: 1748 is 5960 in hex, as /proc/net/udp spells it.
+      test: ["CMD-SHELL", "curl -fs http://localhost:9600/_node/stats >/dev/null && grep -q ':1748' /proc/net/udp"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
 
-# volumes:
-#   esdata01:
-#     driver: local
+  dashboards:
+    build:
+      context: ./opensearch_dashboards
+      args:
+        DASHBOARDS_VERSION: ${DASHBOARDS_VERSION}
+    image: log4opensearch/dashboards:${DASHBOARDS_VERSION}
+    restart: unless-stopped
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    environment:
+      - OPENSEARCH_HOSTS=http://opensearch:9200
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports:
+      - "${DASHBOARDS_PORT}:5601"
+
+volumes:
+  opensearch-data:

@@ -1,0 +1,50 @@
+name: Bug report
+description: Something is not working
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, two things that are **not** bugs:
+
+        - The stack ships **without authentication or TLS on purpose** — see
+          [SECURITY.md](https://github.com/dmonza/log4opensearch/blob/main/SECURITY.md).
+        - Everything tagged `_grokparsefailure_log4net` means your layout matches none of the
+          three patterns — see
+          [Log formats](https://github.com/dmonza/log4opensearch/blob/main/README.md#log-formats).
+
+        Have a question rather than a bug? Use
+        [Discussions](https://github.com/dmonza/log4opensearch/discussions).
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you get instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logline
+    attributes:
+      label: The exact log line you sent
+      description: Copy it verbatim. Whitespace and separators matter for grok.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output of `docker compose logs logstash`
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: "Docker Desktop 4.35 on Windows 11 / Docker Engine 27 on Ubuntu 24.04"
+    validations:
+      required: true

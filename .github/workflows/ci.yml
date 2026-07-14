@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Compose file
+        run: docker compose config -q
+
+      - name: Lint Dockerfiles
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          recursive: true
+          failure-threshold: warning
+
+      - name: Lint shell scripts
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck scripts/*.sh provisioning/*.sh
+
+      - name: Assert no secrets in .env
+        run: |
+          if grep -Eiq '(password|secret|token|api_?key)[[:space:]]*=[[:space:]]*[^[:space:]]' .env; then
+            echo "::error file=.env::.env is committed and must never contain credentials"
+            exit 1
+          fi
+
+      - name: Validate JSON artifacts
+        run: |
+          python3 -m json.tool provisioning/index-template.json > /dev/null
+          sed 's/__RETENTION__/30/' provisioning/ism-policy.json | python3 -m json.tool > /dev/null
+
+  e2e:
+    name: End-to-end smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Raise vm.max_map_count for OpenSearch
+        run: sudo sysctl -w vm.max_map_count=262144
+
+      - name: Start the stack
+        run: docker compose up -d --build --wait --wait-timeout 300
+
+      - name: Run smoke test
+        run: ./scripts/smoke-test.sh
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs --tail=200
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

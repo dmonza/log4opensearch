@@ -1,0 +1,9 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question, idea or comment
+    url: https://github.com/dmonza/log4opensearch/discussions
+    about: Not sure it is a bug? Want to share a setup or float an idea? Start here.
+
+  - name: Security vulnerability
+    url: https://github.com/dmonza/log4opensearch/security/advisories/new
+    about: Report privately. Do not open a public issue.
