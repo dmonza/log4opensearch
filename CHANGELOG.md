@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-14
+
+First tagged release. The stack is complete and CI-verified end to end: send a log line over UDP,
+find it in Dashboards.
+
 ### Added
 - Index template with explicit field mappings.
 - ISM retention policy: log indices are deleted after 30 days (configurable).
@@ -57,3 +62,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `logstash/config/` — never copied into the image.
 - `docker-compose.old` — that is what git history is for.
 - Hardcoded passwords from Compose and the Logstash pipeline.
+
+[Unreleased]: https://github.com/dmonza/log4opensearch/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/dmonza/log4opensearch/releases/tag/v1.0.0

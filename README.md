@@ -1,8 +1,14 @@
 # log4opensearch
 
+[![CI](https://github.com/dmonza/log4opensearch/actions/workflows/ci.yml/badge.svg)](https://github.com/dmonza/log4opensearch/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A ready-to-run Docker Compose stack that receives **log4j** and **log4net** logs over UDP, parses them with **Logstash**, stores them in **OpenSearch**, and lets you explore them in **OpenSearch Dashboards**.
 
 Point your application's UDP appender at port `5960`, run `docker compose up`, and your logs are searchable.
+
+Java or .NET, one app or twenty: if it can write a plain-text log line to a UDP socket, it can ship
+logs here. Copy-paste configs for [log4j2](#log4j2-java) and [log4net](#log4net-net) are below.
 
 > [!WARNING]
 > **This stack ships with security disabled — by design.** It is meant for local development
@@ -17,7 +23,7 @@ Point your application's UDP appender at port `5960`, run `docker compose up`, a
 
 ```
   ┌──────────────┐   UDP 5960    ┌──────────┐              ┌────────────┐
-  │  Your app    │──────────────▶│ Logstash │─────────────▶│ OpenSearch │
+  │  Your app    │──────────────>│ Logstash │─────────────>│ OpenSearch │
   │ log4j/log4net│  plain text   │  (grok)  │   logstash-* │  :9200     │
   └──────────────┘               └──────────┘              └─────┬──────┘
                                                                  │
@@ -97,43 +103,114 @@ see [Log formats](#log-formats).
 
 ## Configuring your application
 
-The stack expects plain-text log lines over UDP. The layout matters — see [Log formats](#log-formats).
+The stack expects **plain-text log lines over UDP** — no JSON, no serialized objects. What the
+appender must produce is a line shaped like this:
 
-### log4j (Java)
+```
+2026-07-13 10:00:00,123-03:00 [1] INFO  - myhost - MYAPP.BACKEND - hello world
+└──── timestamp + offset ────┘ └thread┘ └lvl┘   └─host─┘ └──── env/tag ────┘ └message┘
+```
+
+Both configs below emit exactly that. It is the **bare** format — the simplest of the three the
+pipeline understands; the other two add trace and program fields to the same line. See
+[Log formats](#log-formats) to extract more.
+
+Two details are easy to get wrong and both are silent failures:
+
+- **The timestamp must carry its UTC offset** (`-03:00`). Without it Logstash assumes UTC and your
+  timestamps land hours off.
+- **Encode as UTF-8**, or accented characters arrive mangled.
+
+### log4j2 (Java)
+
+Full `log4j2.xml` — drop it on the classpath (`src/main/resources/`):
 
 ```xml
-<Socket name="UdpAppender" host="localhost" port="5960" protocol="UDP">
-    <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss,SSSZZ} [%t] %-5p - ${hostName} - MYAPP.BACKOFFICE - %m%n"/>
-    <encoding value="utf-8" />
-</Socket>
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+  <Appenders>
+    <Socket name="Udp" host="localhost" port="5960" protocol="UDP">
+      <PatternLayout
+          pattern="%d{yyyy-MM-dd HH:mm:ss,SSSXXX} [%t] %-5p - ${hostName} - MYAPP.BACKEND - %m%n"
+          charset="UTF-8"/>
+    </Socket>
+
+    <Console name="Console" target="SYSTEM_OUT">
+      <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5p %c{1} - %m%n"/>
+    </Console>
+  </Appenders>
+
+  <Loggers>
+    <Root level="info">
+      <AppenderRef ref="Udp"/>
+      <AppenderRef ref="Console"/>
+    </Root>
+  </Loggers>
+</Configuration>
 ```
+
+`${hostName}` is a built-in log4j2 lookup — no need to hardcode the machine name. `XXX` is what
+produces the `-03:00` offset; plain `Z` would emit `-0300`, which also parses, but the examples in
+this README use the colon form.
+
+Requires `log4j-core` 2.x. This is **log4j2** — log4j 1.x has no UDP appender (its `SocketAppender`
+is TCP and speaks a serialized-object protocol), so it cannot talk to this stack.
 
 ### log4net (.NET)
 
+Full `log4net.config` (the same `<log4net>` block works inside `App.config`/`Web.config`):
+
 ```xml
-<appender name="UdpAppender" type="log4net.Appender.UdpAppender">
-   <RemoteAddress value="localhost" />
-   <RemotePort value="5960" />
-   <layout type="log4net.Layout.PatternLayout">
-      <conversionPattern value="%d{ISO8601}%d{zzz} [%t] %-5p - %P{log4net:HostName} - MYAPP.BACKEND - %m%n" />
-   </layout>
-   <encoding value="utf-8" />
-</appender>
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <configSections>
+    <section name="log4net" type="log4net.Config.Log4NetConfigurationSectionHandler, log4net"/>
+  </configSections>
+
+  <log4net>
+    <appender name="UdpAppender" type="log4net.Appender.UdpAppender">
+      <RemoteAddress value="localhost"/>
+      <RemotePort value="5960"/>
+      <encoding value="utf-8"/>
+      <layout type="log4net.Layout.PatternLayout">
+        <conversionPattern
+            value="%d{ISO8601}%d{zzz} [%t] %-5p - %P{log4net:HostName} - MYAPP.BACKEND - %m%n"/>
+      </layout>
+    </appender>
+
+    <root>
+      <level value="INFO"/>
+      <appender-ref ref="UdpAppender"/>
+    </root>
+  </log4net>
+</configuration>
 ```
 
+`%d{ISO8601}` gives the date and time, `%d{zzz}` appends the offset — log4net has no single token
+for both. `%P{log4net:HostName}` is a built-in global property.
+
+On .NET (Core / 5+), point log4net at the file once at startup:
+
+```csharp
+var repo = LogManager.GetRepository(Assembly.GetEntryAssembly());
+XmlConfigurator.Configure(repo, new FileInfo("log4net.config"));
+
+var log = LogManager.GetLogger(typeof(Program));
+log.Info("hello from log4net");
+```
+
+On .NET Framework, `[assembly: log4net.Config.XmlConfigurator(Watch = true)]` in `AssemblyInfo.cs`
+does the same.
+
+### Any other logger
+
+Nothing here is log4j- or log4net-specific — the wire contract is just *one log line per UDP
+datagram, UTF-8, in the layout above*. **NLog** (`Network` target, `udp://host:5960`), **Serilog**
+(a UDP sink), Python's `logging`, or a bare `nc` all work, as long as the layout matches. If it does
+not, the line is still indexed — just tagged `_grokparsefailure_log4net` — so nothing is lost while
+you iterate on it.
+
 Replace `localhost` with the host running the stack.
-
-### GeneXus
-
-The [`genexus/`](genexus) folder contains ready-made configs for GeneXus applications:
-
-| File                 | What it is                                                          |
-| -------------------- | ------------------------------------------------------------------- |
-| `log.config`         | log4net config sending `GeneXusUserLog` output to this stack via UDP |
-| `log.console.config` | Same, but writing to the console — useful while developing           |
-| `sincrumlogs.xpz`    | GeneXus export with helper objects for structured logging            |
-
-Drop `log.config` into your GeneXus model's deployment directory and adjust `RemoteAddress`.
 
 ---
 
@@ -346,6 +423,26 @@ OPENSEARCH_PORT=19200 DASHBOARDS_PORT=15601 LOG_UDP_PORT=15960 docker compose up
 Do *not* try to fix this by adding a `ports:` entry in `docker-compose.override.yml`: Compose
 concatenates port lists, so the conflicting binding would still be there. See
 [Configuration](#configuration).
+
+---
+
+## Appendix: GeneXus
+
+Nothing in this stack is GeneXus-specific — it grew out of a GeneXus deployment, so the
+[`genexus/`](genexus) folder ships the glue for it. Ignore this section if you are not a
+GeneXus user.
+
+GeneXus applications log through log4net, so they need no special support here: the
+[log4net setup](#log4net-net) above applies as-is. These files just save you the typing.
+
+| File                 | What it is                                                          |
+| -------------------- | ------------------------------------------------------------------- |
+| `log.config`         | log4net config sending `GeneXusUserLog` output to this stack via UDP |
+| `log.console.config` | Same, but writing to the console — useful while developing           |
+| `sincrumlogs.xpz`    | GeneXus export with helper objects for structured logging            |
+
+Drop `log.config` into your GeneXus model's deployment directory and set `RemoteAddress` to the
+host running the stack.
 
 ---
 
