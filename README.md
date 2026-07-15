@@ -18,7 +18,7 @@ the bundled Trace Analytics UI — opt-in, off by default. See [OpenTelemetry](#
 > and internal environments. Do not expose it to an untrusted network as-is.
 > See [Security](#security) to turn authentication and TLS on.
 
-![OpenSearch Dashboards showing parsed log4net logs](dashboard.png)
+![OpenSearch Dashboards showing parsed log4net logs](dashboard.gif)
 
 ---
 
@@ -334,9 +334,12 @@ produces one:
 
 - **JVM apps** with the OpenTelemetry Java agent auto-instrument JDBC, so you get a **span per SQL
   statement** with the query text (literal values masked as `?` by default). You drill request → SQL.
-- **.NET apps** relying on object-level spans reach the **operation** (e.g. the procedure or
-  data-provider), **not** the individual SQL. Adding the OpenTelemetry .NET auto-instrumentation for
-  the database client can add per-SQL spans, but that is your application's concern, not the stack's.
+- **.NET apps** (GeneXus generator) ship the OpenTelemetry SqlClient instrumentation, so database
+  access is auto-instrumented too: you get a **span per SQL statement** carrying `db.statement` — you
+  drill request → SQL just like the JVM. The SQL span's display *name* is the KB name (GeneXus sets
+  `db.name` to it), so the query text lives in the `db.statement` attribute, not the span label. For
+  descriptive spans at the **object** level in between (the procedure / business-component names),
+  enable the **Generate Observability span** property on those objects — see the GeneXus appendix.
 
 ### Metrics
 
