@@ -50,6 +50,7 @@ The OpenTelemetry path is **opt-in** — a plain `docker compose up` runs only t
 | `opensearch`   | `9200/tcp`   | Search & storage API                            |
 | `dashboards`   | `5601/tcp`   | Web UI                                          |
 | `provisioning` | —            | One-shot: installs index template + ISM policy, then exits |
+| `provisioning-dashboards` | — | One-shot: imports the Dashboards saved objects (index pattern, dashboard), then exits |
 | `data-prepper` | `4317/tcp`, `4318/tcp` | OTLP/gRPC receiver for traces & logs — **opt-in** (`--profile otel`) |
 
 ---
@@ -106,10 +107,13 @@ see [Log formats](#log-formats).
 
 ### View in Dashboards
 
-1. Go to **Management → Dashboards Management → Index patterns → Create index pattern**
-2. Pattern: `logstash-*`
-3. Time field: `@timestamp`
-4. Open **Discover**
+Open **Discover** (left menu) — the `logstash-*` index pattern is **already there**, so your logs
+show up immediately. Nothing to create: the stack provisions the Dashboards saved objects on
+startup, the same way it installs the index template and retention policy (see
+[Data management](#data-management)).
+
+There is also a ready-made **log4opensearch overview** dashboard (left menu → **Dashboards**):
+log level over time, top hosts, top programs, a parse-failure count, and a recent-messages table.
 
 ---
 
@@ -302,10 +306,10 @@ create an index pattern for them.
 
 ### Exploring logs
 
-Logs do **not** show in Trace Analytics. To see them in **Discover**, create an index pattern once:
-**Management → Dashboards Management → Index patterns → Create**, pattern `otel-logs-*`, **time field
-`time`** (the event time; `@timestamp` is not populated on OTLP log records). Then open Discover and,
-if you like, filter by `traceId` to line a log up with its trace.
+Logs do **not** show in Trace Analytics. To see them, open **Discover** — the `otel-logs-*` index
+pattern (time field **`time`**, the event time; `@timestamp` is not populated on OTLP log records)
+is provisioned automatically when you bring the stack up with the `otel` profile, so there is
+nothing to create. Filter by `traceId` to line a log up with its trace.
 
 ### Multiple projects and apps
 
@@ -362,6 +366,30 @@ Under the `otel` profile ([OpenTelemetry](#opentelemetry-traces--logs)), a secon
 and the **same** ISM policy above is extended to also delete the daily `otel-v1-apm-span-*` and
 `otel-logs-*` indices — one retention knob for every index. The cumulative `otel-v1-apm-service-map`
 is deliberately left out, so the accumulated map is never expired.
+
+A third one-shot (`provisioning-dashboards`) imports the **Dashboards saved objects** — the
+`logstash-*` index pattern, the core visualizations, and the overview dashboard — from a committed,
+versioned artifact ([`provisioning/dashboards/`](provisioning/dashboards)), so Discover and the
+dashboard work with no manual "create an index pattern" step. The import waits until Dashboards is
+actually ready (its `/api/status` returns healthy) and runs with `overwrite=true`, so re-running
+`docker compose up` is safe — objects carry stable ids and are replaced in place, never duplicated.
+Under the `otel` profile, a companion one-shot imports the `otel-logs-*` index pattern too.
+
+**The index pattern's field list is computed at startup, not baked in.** On each `docker compose up`
+the one-shot reads the live fields from the running indices, so any field your pipeline produces —
+including ones you add to the grok later — is picked up automatically on the next start; no manual
+"Refresh field list" click. On a first, empty start (no logs yet) it falls back to the fields
+declared in the index template, so the dashboard still resolves its fields instead of erroring. If
+you change the grok while the stack is already running, re-cache without a full restart:
+
+```bash
+docker compose up -d --force-recreate --no-deps provisioning-dashboards
+```
+
+To change or add visualizations, edit them in Dashboards, export the saved objects
+(**Dashboards Management → Saved Objects → Export**) as NDJSON, and replace the file under
+`provisioning/dashboards/` — keeping the stable ids so re-imports stay idempotent. You can drop the
+exported index pattern's cached `fields` (the import recomputes it), but leaving it in is harmless.
 
 To change retention, override `LOG_RETENTION_DAYS` on the `provisioning` service
 (see [Configuration](#configuration)) and re-run `docker compose up`. The bootstrap script is
@@ -493,7 +521,13 @@ To run with the security plugin on:
 4. **`logstash/pipeline/logstash.conf`** — uncomment the `user`, `password` and `ssl` options
    in the `output` block and supply them via environment variables.
 
-5. Provide **real certificates**. Do not reuse the OpenSearch demo certificates outside of a
+5. **`provisioning/import-dashboards.py`** — the saved-objects import is unauthenticated by
+   default. Set `DASHBOARDS_USER` / `DASHBOARDS_PASSWORD` on the `provisioning-dashboards`
+   service (the script adds basic auth when they are present) and switch `DASHBOARDS_URL` to
+   `https://` (supply the credentials via `docker-compose.override.yml` or a shell variable,
+   never `.env`).
+
+6. Provide **real certificates**. Do not reuse the OpenSearch demo certificates outside of a
    throwaway environment — their private keys are published and known to everyone.
 
 For the full picture, see the

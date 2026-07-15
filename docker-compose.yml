@@ -91,6 +91,36 @@ services:
       - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
     ports:
       - "${DASHBOARDS_PORT}:5601"
+    healthcheck:
+      # /api/status answers 503 while Dashboards is still starting (migrating its .kibana
+      # system index) and 200 only once it can actually serve — so `curl -f` on it IS the
+      # readiness gate. Without this the UI had no healthcheck at all, so `--wait` returned
+      # before it was up and the saved-objects import below would race a not-ready UI. The
+      # image (Amazon Linux 2023) ships curl. Generous start_period: cold start is ~60-90s.
+      test: ["CMD-SHELL", "curl -fs http://localhost:5601/api/status >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 90s
+
+  # One-shot: imports the Dashboards saved objects (the logstash-* index pattern, core
+  # visualizations, and the overview dashboard) so Discover and the dashboard work with no
+  # manual "create an index pattern" step. Mirrors the storage one-shots (provisioning /
+  # provisioning-otel); waits for the UI to be actually ready, imports, exits.
+  # Python (not curl) because it COMPUTES the index pattern's field list at startup — live from
+  # the running indices, falling back to the committed index template on a cold start — instead
+  # of shipping a frozen snapshot that goes stale when the grok/schema changes. See the script.
+  provisioning-dashboards:
+    image: python:3.12-alpine
+    depends_on:
+      dashboards:
+        condition: service_healthy
+    environment:
+      - DASHBOARDS_URL=http://dashboards:5601
+    volumes:
+      - ./provisioning:/provisioning:ro
+    entrypoint: ["python", "/provisioning/import-dashboards.py", "/provisioning/dashboards/log4opensearch.ndjson", "/provisioning/index-template.json"]
+    restart: on-failure
 
   # --- OpenTelemetry (OTLP) ingestion — opt-in via `docker compose --profile otel up` ---
   # These two services carry the `otel` profile, so a plain `docker compose up` never starts
@@ -146,6 +176,25 @@ services:
       timeout: 5s
       retries: 10
       start_period: 60s
+
+  # One-shot: imports the otel-logs-* index pattern so OTLP logs are visible in Discover with no
+  # manual step either (time field `time` — @timestamp is not populated on OTLP log records).
+  # Serialized AFTER the default import (service_completed_successfully) so two imports never
+  # contend on the .kibana saved-objects system index.
+  provisioning-dashboards-otel:
+    image: python:3.12-alpine
+    profiles: ["otel"]
+    depends_on:
+      dashboards:
+        condition: service_healthy
+      provisioning-dashboards:
+        condition: service_completed_successfully
+    environment:
+      - DASHBOARDS_URL=http://dashboards:5601
+    volumes:
+      - ./provisioning:/provisioning:ro
+    entrypoint: ["python", "/provisioning/import-dashboards.py", "/provisioning/dashboards/otel-logs.ndjson", "/provisioning/otel-logs-template.json"]
+    restart: on-failure
 
 volumes:
   opensearch-data:

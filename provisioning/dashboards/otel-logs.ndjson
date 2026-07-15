@@ -1,0 +1,2 @@
+{"attributes":{"timeFieldName":"time","title":"otel-logs-*"},"id":"log4opensearch-otel-logs","migrationVersion":{"index-pattern":"7.6.0"},"references":[],"type":"index-pattern"}
+{"exportedCount":1,"missingRefCount":0,"missingReferences":[]}

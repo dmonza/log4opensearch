@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Dashboards saved objects are auto-provisioned — Discover works out of the box.** A plain
+  `docker compose up` now imports the `logstash-*` index pattern, a set of core visualizations
+  (log level over time, top hosts, top programs, a parse-failure count, a recent-messages table)
+  and an **overview dashboard**, so there is no longer a manual "create an index pattern" step
+  before anything shows in Discover. A one-shot `provisioning-dashboards` service does the import
+  from a committed, versioned NDJSON artifact (`provisioning/dashboards/`) with stable object ids
+  and `overwrite=true`, so re-running is idempotent. Under the `otel` profile a companion one-shot
+  imports the `otel-logs-*` index pattern (time field `time`) too.
+- **The index pattern's field list is computed at startup, not baked in.** The import one-shot
+  reads the live fields from the running indices each start, so fields you add to the grok are
+  picked up automatically on the next `docker compose up` — no manual "Refresh field list". On a
+  first, empty start it falls back to the fields declared in the index template, so the dashboard
+  resolves its fields instead of failing with "Could not locate that index-pattern-field".
+- A **healthcheck on the `dashboards` service** (polls `/api/status`, which answers 503 until the
+  UI can actually serve), so `docker compose up --wait` now waits for Dashboards to be ready and
+  the saved-objects import never races a half-started UI.
 - **OpenTelemetry (OTLP) ingestion — opt-in via the `otel` compose profile.** A plain
   `docker compose up` is unchanged; `docker compose --profile otel up` adds one container, an OTLP
   receiver, and two gRPC ports: `4317` (traces) and `4318` (logs). Traces and the derived service

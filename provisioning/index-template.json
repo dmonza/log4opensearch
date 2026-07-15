@@ -21,6 +21,7 @@
         "traceId":      { "type": "keyword" },
         "source_ip":    { "type": "keyword" },
         "entityId":     { "type": "keyword" },
+        "entityName":   { "type": "keyword" },
         "type":         { "type": "keyword" },
         "tags":         { "type": "keyword" },
         "message":      { "type": "text" }

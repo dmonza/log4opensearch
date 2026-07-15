@@ -17,6 +17,10 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Python bytecode cache (provisioning/import-dashboards.py)
+__pycache__/
+*.pyc
+
 .claude
 docs/
 CLAUDE.md
