@@ -1,0 +1,68 @@
+# Data Prepper pipelines: OTLP/gRPC ingestion for traces and logs.
+#
+# DEV-FIRST: TLS is disabled on every source (ssl: false) so a plain OTLP/gRPC client
+# connects without certificates, matching the rest of the stack. The sources also expose
+# an HTTP /health on their gRPC port (health_check_service + unframed_requests), which the
+# container healthcheck probes — the Data Prepper core API on :4900 has no /health.
+#
+# Index management is HANDED TO THE STACK, not to Data Prepper: every OpenSearch sink uses
+# index_type: management_disabled, so Data Prepper creates no template, no ISM policy and no
+# rollover. The index templates live in provisioning/otel-*-template.json and the retention
+# ISM in provisioning/ism-policy.json — the single LOG_RETENTION_DAYS knob governs the OTLP
+# indices exactly as it governs logstash-*. Spans and logs go to daily indices so age-based
+# deletion partitions; the service map is a cumulative single index, excluded from deletion.
+
+# ---- Traces: one gRPC ingress, fanned out to the raw-span and service-map pipelines ----
+entry-pipeline:
+  source:
+    otel_trace_source:
+      ssl: false
+      unframed_requests: true
+      health_check_service: true
+  buffer:
+    bounded_blocking:
+      buffer_size: 25600
+      batch_size: 400
+  sink:
+    - pipeline:
+        name: raw-trace-pipeline
+    - pipeline:
+        name: service-map-pipeline
+
+raw-trace-pipeline:
+  source:
+    pipeline:
+      name: entry-pipeline
+  processor:
+    - otel_traces:
+  sink:
+    - opensearch:
+        hosts: ["http://opensearch:9200"]
+        index_type: management_disabled
+        index: "otel-v1-apm-span-%{yyyy.MM.dd}"
+
+service-map-pipeline:
+  source:
+    pipeline:
+      name: entry-pipeline
+  processor:
+    - service_map_stateful:
+        window_duration: 180
+  sink:
+    - opensearch:
+        hosts: ["http://opensearch:9200"]
+        index_type: management_disabled
+        index: "otel-v1-apm-service-map"
+
+# ---- Logs: their own gRPC ingress and daily index ----
+otel-logs-pipeline:
+  source:
+    otel_logs_source:
+      ssl: false
+      unframed_requests: true
+      health_check_service: true
+  sink:
+    - opensearch:
+        hosts: ["http://opensearch:9200"]
+        index_type: management_disabled
+        index: "otel-logs-%{yyyy.MM.dd}"

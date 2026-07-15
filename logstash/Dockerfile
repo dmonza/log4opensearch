@@ -9,7 +9,3 @@ COPY --chown=logstash:logstash pipeline/logstash.conf /usr/share/logstash/pipeli
 
 EXPOSE 5960/udp
 EXPOSE 9600
-
-# FROM opensearchproject/logstash-oss-with-opensearch-output-plugin:7.16.2
-# RUN rm -f /usr/share/logstash/pipeline/logstash.conf
-# ADD pipeline/ /usr/share/logstash/pipeline/

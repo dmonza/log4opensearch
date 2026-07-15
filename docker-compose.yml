@@ -92,5 +92,60 @@ services:
     ports:
       - "${DASHBOARDS_PORT}:5601"
 
+  # --- OpenTelemetry (OTLP) ingestion — opt-in via `docker compose --profile otel up` ---
+  # These two services carry the `otel` profile, so a plain `docker compose up` never starts
+  # them: the default stack is byte-for-byte unchanged.
+
+  # One-shot: installs the OTLP index templates (mappings only). The retention ISM that
+  # governs these indices is installed by the always-on `provisioning` service, whose policy
+  # is extended to cover the OTLP span and log patterns — hence the depends_on below.
+  provisioning-otel:
+    image: curlimages/curl:8.11.1
+    profiles: ["otel"]
+    depends_on:
+      opensearch:
+        condition: service_healthy
+      provisioning:
+        condition: service_completed_successfully
+    environment:
+      - OPENSEARCH_URL=http://opensearch:9200
+    volumes:
+      - ./provisioning:/provisioning:ro
+    entrypoint: ["sh", "/provisioning/bootstrap-otel.sh"]
+    restart: on-failure
+
+  # The OTLP receiver: terminates OTLP/gRPC and writes traces and logs to OpenSearch.
+  # index_type: management_disabled in the pipelines means it creates no template or ISM of
+  # its own — the stack owns those (provisioning/otel-*-template.json + the retention ISM).
+  data-prepper:
+    image: opensearchproject/data-prepper:${DATAPREPPER_VERSION}
+    profiles: ["otel"]
+    restart: unless-stopped
+    depends_on:
+      opensearch:
+        condition: service_healthy
+      provisioning-otel:
+        condition: service_completed_successfully
+    environment:
+      # The image sets JAVA_OPTS internally and overrides it; DATA_PREPPER_JAVA_OPTS is the
+      # user-facing heap override.
+      - DATA_PREPPER_JAVA_OPTS=-Xms${DATAPREPPER_HEAP} -Xmx${DATAPREPPER_HEAP}
+    volumes:
+      - ./data-prepper/pipelines.yaml:/usr/share/data-prepper/pipelines/pipelines.yaml:ro
+      - ./data-prepper/data-prepper-config.yaml:/usr/share/data-prepper/config/data-prepper-config.yaml:ro
+    ports:
+      # Both are OTLP/gRPC. 21890 = traces source, 21892 = logs source (container side).
+      - "${OTLP_TRACES_PORT}:21890"
+      - "${OTLP_LOGS_PORT}:21892"
+    healthcheck:
+      # The core API on :4900 has no /health; the trace source exposes one over HTTP on its
+      # gRPC port (health_check_service + unframed_requests + ssl:false in pipelines.yaml).
+      # Requiring it bound before "up" is the same lesson the Logstash UDP healthcheck learned.
+      test: ["CMD-SHELL", "curl -fs http://localhost:21890/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
 volumes:
   opensearch-data:

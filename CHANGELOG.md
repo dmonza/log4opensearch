@@ -6,6 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **OpenTelemetry (OTLP) ingestion — opt-in via the `otel` compose profile.** A plain
+  `docker compose up` is unchanged; `docker compose --profile otel up` adds one container, an OTLP
+  receiver, and two gRPC ports: `4317` (traces) and `4318` (logs). Traces and the derived service
+  map feed the bundled Trace Analytics UI, so a slow request can be drilled down its span waterfall —
+  to the database query when the client's instrumentation emits a statement span.
+- Separate OTLP indices (`otel-v1-apm-span-*`, `otel-v1-apm-service-map`, `otel-logs-*`), kept apart
+  from `logstash-*` — the legacy log path and the OTLP path live in separate contexts.
+- The receiver runs with `index_type: management_disabled`, so the stack owns the OTLP index
+  templates (`provisioning/otel-*-template.json`, installed by the profiled `provisioning-otel`
+  one-shot) and the retention policy. The existing ISM policy is **extended** to delete the daily
+  OTLP span and log indices under the same `LOG_RETENTION_DAYS` knob; the cumulative service-map
+  index is excluded.
+- Dedicated OTLP smoke test (`scripts/otlp-smoke-test.sh`) emitting real OTLP traces and logs over
+  gRPC with telemetrygen; CI runs it under the `otel` profile and asserts the default bring-up leaves
+  the OTLP port closed and the existing UDP path unaffected.
+- `.env`: `DATAPREPPER_VERSION`, `DATAPREPPER_HEAP`, `OTLP_TRACES_PORT`, `OTLP_LOGS_PORT`.
+- README: an OpenTelemetry section and a GeneXus appendix covering client-side setup, the per-runtime
+  drilldown reality (Java reaches the SQL statement, .NET the operation), and a warning that enabling
+  OpenTelemetry replaces log4net in .NET.
+
 ## [1.0.0] - 2026-07-14
 
 First tagged release. The stack is complete and CI-verified end to end: send a log line over UDP,

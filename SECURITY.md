@@ -8,6 +8,8 @@ a single `docker compose up`. This is a documented design decision, not a vulner
 - No authentication on OpenSearch (`9200`) or Dashboards (`5601`)
 - No TLS anywhere
 - The UDP ingestion port (`5960`) accepts unauthenticated input from anyone who can reach it
+- Under the `otel` profile, the OTLP/gRPC ports (`4317` traces, `4318` logs) likewise accept
+  unauthenticated, plaintext input from anyone who can reach them
 
 **Do not deploy this configuration on an untrusted network.** The README explains how to enable
 the security plugin, TLS and credentials.

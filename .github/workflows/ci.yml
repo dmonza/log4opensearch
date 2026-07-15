@@ -37,7 +37,15 @@ jobs:
       - name: Validate JSON artifacts
         run: |
           python3 -m json.tool provisioning/index-template.json > /dev/null
+          python3 -m json.tool provisioning/otel-span-template.json > /dev/null
+          python3 -m json.tool provisioning/otel-service-map-template.json > /dev/null
+          python3 -m json.tool provisioning/otel-logs-template.json > /dev/null
           sed 's/__RETENTION__/30/' provisioning/ism-policy.json | python3 -m json.tool > /dev/null
+
+      - name: Validate Data Prepper YAML
+        run: |
+          python3 -m pip install --quiet pyyaml
+          python3 -c "import yaml; yaml.safe_load(open('data-prepper/pipelines.yaml')); yaml.safe_load(open('data-prepper/data-prepper-config.yaml'))"
 
   e2e:
     name: End-to-end smoke test
@@ -48,16 +56,33 @@ jobs:
       - name: Raise vm.max_map_count for OpenSearch
         run: sudo sysctl -w vm.max_map_count=262144
 
-      - name: Start the stack
+      - name: Start the default stack
         run: docker compose up -d --build --wait --wait-timeout 300
 
-      - name: Run smoke test
+      - name: Assert the OTLP port is closed without the profile
+        run: |
+          if timeout 2 bash -c '</dev/tcp/127.0.0.1/4317' 2>/dev/null; then
+            echo "::error::OTLP port 4317 is open without the otel profile — the default bring-up must not start the receiver"
+            exit 1
+          fi
+          echo "OTLP port closed by default — ok"
+
+      - name: Run UDP smoke test (default path)
+        run: ./scripts/smoke-test.sh
+
+      - name: Start the OTLP profile
+        run: docker compose --profile otel up -d --build --wait --wait-timeout 360
+
+      - name: Run OTLP smoke test
+        run: ./scripts/otlp-smoke-test.sh
+
+      - name: Re-run UDP smoke test (existing path unaffected by the profile)
         run: ./scripts/smoke-test.sh
 
       - name: Dump logs on failure
         if: failure()
-        run: docker compose logs --tail=200
+        run: docker compose --profile otel logs --tail=200
 
       - name: Tear down
         if: always()
-        run: docker compose down -v
+        run: docker compose --profile otel down -v

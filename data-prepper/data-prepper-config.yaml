@@ -1,0 +1,5 @@
+# Data Prepper core API (port 4900) configuration.
+# DEV-FIRST: TLS off, matching the rest of the stack. The core API defaults to ssl: true,
+# which would make it serve HTTPS with the image's demo keystore; we disable it so the
+# service starts cleanly on a plain-HTTP, no-security network. The port is not published.
+ssl: false

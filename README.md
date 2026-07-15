@@ -10,6 +10,9 @@ Point your application's UDP appender at port `5960`, run `docker compose up`, a
 Java or .NET, one app or twenty: if it can write a plain-text log line to a UDP socket, it can ship
 logs here. Copy-paste configs for [log4j2](#log4j2-java) and [log4net](#log4net-net) are below.
 
+Already on **OpenTelemetry**? The stack can also ingest OTLP **traces and logs** and explore them in
+the bundled Trace Analytics UI — opt-in, off by default. See [OpenTelemetry](#opentelemetry-traces--logs).
+
 > [!WARNING]
 > **This stack ships with security disabled — by design.** It is meant for local development
 > and internal environments. Do not expose it to an untrusted network as-is.
@@ -22,16 +25,24 @@ logs here. Copy-paste configs for [log4j2](#log4j2-java) and [log4net](#log4net-
 ## Architecture
 
 ```
-  ┌──────────────┐   UDP 5960    ┌──────────┐              ┌────────────┐
-  │  Your app    │──────────────>│ Logstash │─────────────>│ OpenSearch │
-  │ log4j/log4net│  plain text   │  (grok)  │   logstash-* │  :9200     │
-  └──────────────┘               └──────────┘              └─────┬──────┘
-                                                                 │
-                                                          ┌──────▼──────────┐
-                                                          │   Dashboards    │
-                                                          │     :5601       │
-                                                          └─────────────────┘
+  ┌──────────────┐   UDP 5960     ┌──────────────┐
+  │  Your app    │───────────────>│   Logstash   │──── logstash-* ─────┐
+  │ log4j/log4net│   plain text   │    (grok)    │                     │
+  └──────────────┘                └──────────────┘                     │
+                                                                       ▼
+  ┌──────────────┐  OTLP/gRPC     ┌──────────────┐             ┌────────────┐
+  │  Your app    │───────────────>│ Data Prepper │── otel-* ──>│ OpenSearch │
+  │ OpenTelemetry│  4317 / 4318   │(otel profile)│            │   :9200    │
+  └──────────────┘                └──────────────┘             └─────┬──────┘
+       traces & logs — opt-in: docker compose --profile otel up      │
+                                                              ┌───────▼─────────┐
+                                                              │   Dashboards    │
+                                                              │     :5601       │
+                                                              └─────────────────┘
 ```
+
+The OpenTelemetry path is **opt-in** — a plain `docker compose up` runs only the top row. See
+[OpenTelemetry](#opentelemetry-traces--logs).
 
 | Service        | Port         | Purpose                                         |
 | -------------- | ------------ | ----------------------------------------------- |
@@ -39,13 +50,14 @@ logs here. Copy-paste configs for [log4j2](#log4j2-java) and [log4net](#log4net-
 | `opensearch`   | `9200/tcp`   | Search & storage API                            |
 | `dashboards`   | `5601/tcp`   | Web UI                                          |
 | `provisioning` | —            | One-shot: installs index template + ISM policy, then exits |
+| `data-prepper` | `4317/tcp`, `4318/tcp` | OTLP/gRPC receiver for traces & logs — **opt-in** (`--profile otel`) |
 
 ---
 
 ## Requirements
 
 - Docker Engine 24+ with Compose v2 (Docker Desktop works out of the box)
-- ~2 GB of free RAM
+- ~2 GB of free RAM (~3 GB with the `otel` profile — it adds one more JVM)
 
 ## Quick start
 
@@ -249,6 +261,92 @@ and place your new pattern **above** any pattern more generic than it.
 
 ---
 
+## OpenTelemetry (traces & logs)
+
+Beyond plain-text logs, the stack can ingest **OpenTelemetry** traces and logs over **OTLP/gRPC**
+and explore them in the bundled **Trace Analytics** UI — so you can open a slow request and drill
+down its span waterfall to the operation that cost the time, and to the **database query** itself
+when your instrumentation emits one.
+
+This path is **opt-in** and off by default. A plain `docker compose up` is unchanged. Turn it on
+with the `otel` profile:
+
+```bash
+docker compose --profile otel up --build
+```
+
+That adds one container — an OTLP receiver — and two gRPC ingress ports:
+
+| Port | Signal | Point your exporter's… |
+| --- | --- | --- |
+| `4317/tcp` | traces | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://<host>:4317` |
+| `4318/tcp` | logs   | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://<host>:4318` |
+
+> Both ports speak **gRPC**. This stack ships **no OTLP/HTTP** endpoint, so `4318` here carries
+> **logs over gRPC** — it is not the usual OTLP/HTTP port. Traces and logs are separate receivers,
+> hence two endpoints; a standard OpenTelemetry SDK or agent lets you set a per-signal endpoint.
+
+Traces land in `otel-v1-apm-span-*`, the service map in `otel-v1-apm-service-map`, logs in
+`otel-logs-*` — all separate from `logstash-*`. The legacy log path and the OTLP path live in
+**separate contexts** and never collide.
+
+### Exploring traces
+
+Open **Trace Analytics** in Dashboards (left menu → Observability → Trace Analytics): the trace list,
+latency and error views, the service map, and — per trace — the **span waterfall**. Click the slowest
+span to see its attributes, including the database statement when the span carries one.
+
+**Nothing to configure for traces** — Trace Analytics reads `otel-v1-apm-span-*` and
+`otel-v1-apm-service-map` by their fixed names, so traces appear as soon as they arrive; you do **not**
+create an index pattern for them.
+
+### Exploring logs
+
+Logs do **not** show in Trace Analytics. To see them in **Discover**, create an index pattern once:
+**Management → Dashboards Management → Index patterns → Create**, pattern `otel-logs-*`, **time field
+`time`** (the event time; `@timestamp` is not populated on OTLP log records). Then open Discover and,
+if you like, filter by `traceId` to line a log up with its trace.
+
+### Multiple projects and apps
+
+Everything lands in the shared OTLP indices; you separate projects and apps with the standard
+OpenTelemetry **resource attributes**, set on the client:
+
+- `service.name` — the individual app: `OTEL_SERVICE_NAME=web`.
+- `service.namespace` — the **project** it belongs to: `OTEL_RESOURCE_ATTRIBUTES=service.namespace=projectA`.
+
+Trace Analytics is built around `service.name`, so a naming convention like `projectA/web` reads cleanly
+there. In Discover and dashboards, filter spans and logs by `resource.attributes.service@namespace`
+(Data Prepper flattens attribute dots to `@`). This is **soft** isolation — all projects share the
+indices and the single retention knob. Hard per-project isolation (separate indices, separate retention
+or access) is intentionally not done: on an unauthenticated endpoint a client-controlled index name
+invites index explosion, the same reason the log path keeps one shared index.
+
+### How deep the drilldown goes
+
+The stack renders whatever span tree your application emits. **How far you can drill is a property of
+your instrumentation, not of the stack.** A database-query span carries the SQL only if your runtime
+produces one:
+
+- **JVM apps** with the OpenTelemetry Java agent auto-instrument JDBC, so you get a **span per SQL
+  statement** with the query text (literal values masked as `?` by default). You drill request → SQL.
+- **.NET apps** relying on object-level spans reach the **operation** (e.g. the procedure or
+  data-provider), **not** the individual SQL. Adding the OpenTelemetry .NET auto-instrumentation for
+  the database client can add per-SQL spans, but that is your application's concern, not the stack's.
+
+### Metrics
+
+Metrics (OTLP's third signal) are **not** ingested yet — they answer aggregate questions, not the
+per-request drilldown this path is for. They are planned as a future opt-in on the same receiver.
+
+### Retention
+
+The OTLP span and log indices are governed by the **same** `LOG_RETENTION_DAYS` knob as `logstash-*`
+(see [Data management](#data-management)). The cumulative **service-map index is excluded** — it is
+not time-partitioned, so deleting it would erase the accumulated map rather than expire old data.
+
+---
+
 ## Data management
 
 Logs land in daily indices: `logstash-YYYY.MM.dd`.
@@ -258,6 +356,12 @@ Two artifacts are installed automatically on startup by the `provisioning` servi
 - **[`provisioning/index-template.json`](provisioning/index-template.json)** — explicit field mappings.
 - **[`provisioning/ism-policy.json`](provisioning/ism-policy.json)** — an ISM policy that
   **deletes indices older than 30 days**. Without it, disk usage grows forever.
+
+Under the `otel` profile ([OpenTelemetry](#opentelemetry-traces--logs)), a second one-shot
+(`provisioning-otel`) installs the trace and log index templates (`provisioning/otel-*-template.json`),
+and the **same** ISM policy above is extended to also delete the daily `otel-v1-apm-span-*` and
+`otel-logs-*` indices — one retention knob for every index. The cumulative `otel-v1-apm-service-map`
+is deliberately left out, so the accumulated map is never expired.
 
 To change retention, override `LOG_RETENTION_DAYS` on the `provisioning` service
 (see [Configuration](#configuration)) and re-run `docker compose up`. The bootstrap script is
@@ -346,6 +450,8 @@ What that means in practice:
 
 - Anyone who can reach port `9200` can read and delete all your logs.
 - Anyone who can reach port `5960/udp` can inject arbitrary log entries.
+- Under the `otel` profile, anyone who can reach `4317/tcp` or `4318/tcp` can inject arbitrary
+  OpenTelemetry traces and logs — those OTLP endpoints are unauthenticated and plaintext too.
 - Everything travels in plaintext.
 
 **Only run this on `localhost` or a trusted internal network.**
@@ -443,6 +549,43 @@ GeneXus applications log through log4net, so they need no special support here: 
 
 Drop `log.config` into your GeneXus model's deployment directory and set `RemoteAddress` to the
 host running the stack.
+
+### GeneXus with OpenTelemetry
+
+GeneXus apps can emit **OpenTelemetry** traces and logs instead of (or alongside) log4net. Enable it
+in the generator — set the **Observability Provider** property to **OpenTelemetry** — start the stack
+with the `otel` profile (see [OpenTelemetry](#opentelemetry-traces--logs)), and point the exporter at
+it with the standard environment variables:
+
+```bash
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://<host>:4317
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://<host>:4318
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_SERVICE_NAME=my-genexus-app
+# Group several GeneXus apps under one project (soft multi-project isolation):
+OTEL_RESOURCE_ATTRIBUTES=service.namespace=my-project
+```
+
+> [!WARNING]
+> **Enabling OpenTelemetry replaces log4net in .NET.** When the Observability Provider is set to
+> anything other than *None*, the GeneXus .NET generator stops using log4net: that app no longer feeds
+> the UDP/log path — it feeds OTLP instead. Coexistence is therefore **per application**: one app ships
+> log4net *or* OpenTelemetry, not both. Across a fleet, some apps can use each, and this stack accepts
+> both at once. (The Java generator keeps log4j2 and can additionally correlate logs by `trace_id`.)
+
+**Traces per generator — this decides how deep you can drill:**
+
+- **Java** — instrumentation is **automatic** via the OpenTelemetry Java agent
+  (`-javaagent:opentelemetry-javaagent.jar`, packaged in the GeneXus Java deployment). Database access
+  is auto-instrumented, so you get a **span per SQL statement** with the query text — you drill a slow
+  request all the way to the query. The statement is **sanitized by default** (literals shown as `?`);
+  to capture literal values set `OTEL_INSTRUMENTATION_COMMON_DB_STATEMENT_SANITIZER_ENABLED=false` on
+  the app, accepting the privacy trade-off.
+- **.NET** — enable the **Generate Observability span** property on the objects you want traced
+  (Procedures, Data Providers, Business Components). These are **object-level** spans: you drill to the
+  procedure or data-provider, **not** the individual SQL. GeneXus emits no per-SQL span for .NET today;
+  adding the OpenTelemetry .NET auto-instrumentation for the database client is an (unsupported,
+  untested-here) way to obtain one.
 
 ---
 
