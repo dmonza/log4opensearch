@@ -11,13 +11,13 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Validate Compose file
         run: docker compose config -q
 
       - name: Lint Dockerfiles
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.3.0
         with:
           recursive: true
           failure-threshold: warning
@@ -51,7 +51,7 @@ jobs:
     name: End-to-end smoke test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Raise vm.max_map_count for OpenSearch
         run: sudo sysctl -w vm.max_map_count=262144
