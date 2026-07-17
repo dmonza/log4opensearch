@@ -18,7 +18,7 @@ the bundled Trace Analytics UI — opt-in, off by default. See [OpenTelemetry](#
 > and internal environments. Do not expose it to an untrusted network as-is.
 > See [Security](#security) to turn authentication and TLS on.
 
-![OpenSearch Dashboards showing parsed log4net logs](dashboard.gif)
+![OpenSearch Dashboards showing parsed log4net logs](log4opensearch-dashboard.gif)
 
 ---
 
