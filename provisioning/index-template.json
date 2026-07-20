@@ -24,6 +24,7 @@
         "entityName":   { "type": "keyword" },
         "type":         { "type": "keyword" },
         "tags":         { "type": "keyword" },
+        "metric":       { "type": "float" },
         "message":      { "type": "text" }
       }
     }

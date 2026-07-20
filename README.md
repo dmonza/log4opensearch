@@ -265,6 +265,61 @@ and place your new pattern **above** any pattern more generic than it.
 
 ---
 
+## Trade-offs
+
+This stack makes a few deliberate design choices that favor *runs with zero friction* over
+guarantees. They are gathered here so you know what you are getting before you rely on it.
+
+### Delivery over UDP
+
+The log path runs over **UDP**, on purpose. UDP is *fire-and-forget*: the appender sends the
+datagram and moves on, so a slow, overloaded or down collector never blocks your application and
+never pushes backpressure onto it. The price of that decoupling is that **delivery is not
+guaranteed** — there is no acknowledgement and no retransmission, so a log line that does not make
+it is simply gone, and the sender is never told.
+
+Lines get dropped, silently, in two ways — and both get worse the more you send:
+
+- **Volume / bursts.** Incoming datagrams wait in a fixed-size kernel receive buffer until Logstash
+  reads them. Under a spike — or while Logstash is briefly busy (a GC pause, an index/mapping
+  refresh) — that buffer fills and the kernel **discards every further datagram** with no error to
+  anyone. It is a cliff, not a graceful slowdown: below the buffer's capacity you lose nothing, once
+  it saturates you lose whatever arrives next. The higher your log rate, the sooner you hit it.
+- **Line size.** One log line must fit in one datagram. The hard ceiling is the maximum UDP payload,
+  ~**65 KB** — a line longer than that cannot be sent at all. Well before that, once a line exceeds
+  the network's **MTU** (~1500 bytes on Ethernet) the datagram is split into several IP fragments,
+  and **if any single fragment is lost the whole line is dropped** — UDP has no partial delivery. So
+  the probability of loss *grows with line length*: long lines, and multi-line stack traces in
+  particular, are the first to vanish.
+
+Practical guidance:
+
+- **Keep the stack close to the sender** — same host or same LAN. Loss on a reliable local link is
+  negligible; loss across a congested WAN or the public internet is not.
+- **Keep log lines short.** Move large payloads (full request/response bodies, huge stack traces)
+  elsewhere, or expect them to be the first casualties.
+- This stack is built for **operational logs, where an occasional dropped line is acceptable** — the
+  normal case for application logging. If you need *guaranteed* delivery (audit trails, billing
+  events), plain-text UDP is the wrong transport: use the [OpenTelemetry](#opentelemetry-traces--logs)
+  path below — it runs over gRPC/TCP and is not subject to these loss modes — or ship to a durable
+  queue instead.
+
+### No authentication or TLS (dev-first)
+
+The default deployment has **no auth and no TLS anywhere** — zero friction to get running, meant for
+`localhost` or a trusted internal network only. Anyone who can reach the ports can read, delete or
+inject data, and traffic is plaintext. Enabling an authenticated, encrypted mode is a documented
+multi-file change — see [Security](#security).
+
+### Flat schema (ECS compatibility disabled)
+
+The pipeline uses the flat, pre-ECS layout (`host` is a `keyword` string, not a `host.hostname`
+object) so it matches the index template; leaving ECS mode on would turn `host` into an object and
+make OpenSearch reject documents on a mapping conflict. It is therefore disabled deliberately, in two
+places — see [Version notes](#version-notes).
+
+---
+
 ## OpenTelemetry (traces & logs)
 
 Beyond plain-text logs, the stack can ingest **OpenTelemetry** traces and logs over **OTLP/gRPC**
@@ -542,7 +597,9 @@ For the full picture, see the
 
 **Nothing shows up in Dashboards.**
 Check that Logstash is actually receiving traffic: `docker compose logs -f logstash`.
-UDP is fire-and-forget — if the port is wrong or blocked, the sender gets no error.
+UDP is fire-and-forget — if the port is wrong or blocked, the sender gets no error. Even with the
+port right, UDP can drop lines under load or when they are too large; see
+[Trade-offs](#trade-offs).
 
 **Logs arrive but every field is `_grokparsefailure_log4net`.**
 Your appender layout does not match any of the three patterns. Compare your output against
